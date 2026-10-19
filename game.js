@@ -10,7 +10,6 @@
   const PLAYER_HALF_W = 0.9;
   const PLAYER_HALF_L = 1.95;
   const PLAYER_LIMIT = 4.45;
-  const STEER_STEP = 1.55;
   const RAIL_SPARK_X = 3.88;
 
   const $ = (id) => document.getElementById(id);
@@ -180,6 +179,10 @@
     railSparkTimer: 0,
     damageSmokeTimer: 0,
     overdriveHintShown: false,
+    fuelEmptyNotified: false,
+    steerHoldTime: 0,
+    activeSteer: 0,
+    railOversteer: 0,
     newBest: false,
     scrollSpeed: 0,
     hudCache: {}
@@ -194,6 +197,12 @@
   let toastTimer = 0;
   let flashTimer = 0;
   let audio = null;
+  const steerInput = {
+    leftTouch: false,
+    rightTouch: false,
+    leftKey: false,
+    rightKey: false
+  };
 
   const renderer = new THREE.WebGLRenderer({
     canvas: dom.canvas,
@@ -1121,14 +1130,25 @@
     return npc;
   }
 
+  function randomTrafficType() {
+    const roll = Math.random();
+    if (roll < 0.08) return "tanker";
+    if (roll < 0.2) return "flatbed";
+    if (roll < 0.32) return "hopper";
+    if (roll < 0.5) return "truck";
+    return "sedan";
+  }
+
   function spawnInitialTraffic() {
-    makeNPC("sedan", 0, -38, clamp(game.speed - rand(18, 28), 34, 70));
-    makeNPC("sedan", 2, -56, clamp(game.speed - rand(26, 42), 30, 64));
-    makeNPC("truck", 1, -78, clamp(game.speed - rand(36, 52), 28, 58));
-    makeNPC("sedan", 1, -112, clamp(game.speed - rand(22, 38), 32, 64));
-    makeNPC("flatbed", 0, -145, clamp(game.speed - rand(40, 55), 28, 52));
-    makeNPC("hopper", 2, -162, clamp(game.speed - rand(15, 30), 36, 70));
-    makeNPC("tanker", 1, -196, clamp(game.speed - rand(28, 45), 32, 62));
+    const bands = [-36, -62, -91, -122, -156, -192, -224];
+    for (const band of bands) {
+      const z = band + rand(-5, 5);
+      const candidates = [0, 1, 2].filter((lane) => {
+        return !npcs.some((npc) => npc.lane === lane && Math.abs(npc.z - z) < 22);
+      });
+      const lane = candidates.length ? pick(candidates) : randInt(0, 2);
+      makeNPC(randomTrafficType(), lane, z, clamp(game.speed - rand(16, 52), 28, 130));
+    }
   }
 
   function clearNPCs() {
@@ -1192,27 +1212,45 @@
     setPedalVisual(dom.brakePedal, value);
   }
 
-  function changeLane(direction) {
-    if (game.state !== "running") return;
-    const proposed = game.targetX + direction * STEER_STEP;
-    const atEdge = game.jumpMode === null && (direction > 0 ? game.playerX >= PLAYER_LIMIT - 0.14 : game.playerX <= -PLAYER_LIMIT + 0.14);
+  function updateSteering(dt) {
+    const left = steerInput.leftTouch || steerInput.leftKey;
+    const right = steerInput.rightTouch || steerInput.rightKey;
+    const direction = left === right ? 0 : left ? -1 : 1;
+    game.activeSteer = direction;
+    if (game.state !== "running" || direction === 0) {
+      game.steerHoldTime = 0;
+      game.railOversteer = 0;
+      return;
+    }
+    game.steerHoldTime = Math.min(1.35, game.steerHoldTime + dt);
+    const lateralSpeed = 1.35 + game.steerHoldTime * 3.9;
+    const proposed = game.targetX + direction * lateralSpeed * dt;
     if (proposed > PLAYER_LIMIT) {
-      if (atEdge) {
-        endGame("rail", { side: 1 });
-        return;
-      }
       game.targetX = PLAYER_LIMIT;
-    } else if (proposed < -PLAYER_LIMIT) {
-      if (atEdge) {
-        endGame("rail", { side: -1 });
-        return;
+      if (game.jumpMode === null && game.playerX >= PLAYER_LIMIT - 0.18) {
+        game.railOversteer += dt;
+        if (game.railOversteer >= 0.14) {
+          endGame("rail", { side: 1 });
+          return;
+        }
+      } else {
+        game.railOversteer = 0;
       }
+    } else if (proposed < -PLAYER_LIMIT) {
       game.targetX = -PLAYER_LIMIT;
+      if (game.jumpMode === null && game.playerX <= -PLAYER_LIMIT + 0.18) {
+        game.railOversteer += dt;
+        if (game.railOversteer >= 0.14) {
+          endGame("rail", { side: -1 });
+          return;
+        }
+      } else {
+        game.railOversteer = 0;
+      }
     } else {
       game.targetX = proposed;
+      game.railOversteer = 0;
     }
-    game.steerPulse = direction;
-    playSound("lane");
   }
 
   function bindHold(element, onDown, onUp) {
@@ -1243,14 +1281,24 @@
   bindHold(dom.throttlePedal, () => setThrottle(true), () => setThrottle(false));
   bindHold(dom.brakePedal, () => setBrake(true), () => setBrake(false));
 
-  dom.steerLeft.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    changeLane(-1);
-  });
-  dom.steerRight.addEventListener("pointerdown", (event) => {
-    event.preventDefault();
-    changeLane(1);
-  });
+  bindHold(
+    dom.steerLeft,
+    () => {
+      steerInput.leftTouch = true;
+    },
+    () => {
+      steerInput.leftTouch = false;
+    }
+  );
+  bindHold(
+    dom.steerRight,
+    () => {
+      steerInput.rightTouch = true;
+    },
+    () => {
+      steerInput.rightTouch = false;
+    }
+  );
 
   function showToast(message, type, duration) {
     dom.toast.textContent = message;
@@ -1885,7 +1933,7 @@
 
   function createPickupVisual(type) {
     const group = new THREE.Group();
-    const glowColor = type === "fuel" ? 0xffb33c : type === "toolbox" ? 0x58dfff : 0xb26cff;
+    const glowColor = type === "fuel" ? 0xffb33c : type === "toolbox" ? 0x58dfff : type === "oil" ? 0x4cffb2 : 0xb26cff;
     if (type === "fuel") {
       const body = new THREE.MeshStandardMaterial({ color: 0xe5452f, metalness: 0.42, roughness: 0.4, flatShading: true });
       const cap = new THREE.MeshStandardMaterial({ color: 0xffc83d, metalness: 0.55, roughness: 0.3 });
@@ -1901,6 +1949,13 @@
       addBox(group, 0.36, 0.08, 0.07, shared.chrome, 0, 0.32, 0);
       addBox(group, 0.07, 0.2, 0.07, shared.chrome, -0.16, 0.4, 0);
       addBox(group, 0.07, 0.2, 0.07, shared.chrome, 0.16, 0.4, 0);
+    } else if (type === "oil") {
+      const body = new THREE.MeshStandardMaterial({ color: 0x34d6a1, metalness: 0.45, roughness: 0.32, flatShading: true });
+      const cap = new THREE.MeshStandardMaterial({ color: 0xf4f1d6, metalness: 0.4, roughness: 0.3 });
+      addBox(group, 0.38, 0.62, 0.32, body, 0, 0, 0);
+      addBox(group, 0.2, 0.12, 0.18, cap, 0.02, 0.37, 0);
+      addBox(group, 0.18, 0.32, 0.03, shared.chrome, -0.05, -0.02, 0.17, false);
+      addBox(group, 0.42, 0.1, 0.36, shared.dark, 0, -0.34, 0, false);
     } else {
       const scrap = new THREE.MeshStandardMaterial({ color: 0x6a6572, metalness: 0.25, roughness: 0.85, flatShading: true });
       const chunkA = new THREE.Mesh(new THREE.DodecahedronGeometry(0.34, 0), scrap);
@@ -1913,8 +1968,8 @@
       group.add(chunkB);
       addBox(group, 0.55, 0.05, 0.06, shared.chrome, 0, 0.18, 0.1, false);
     }
-    const labelColor = type === "fuel" ? "#ffcf5a" : type === "toolbox" ? "#6cf4ff" : "#e6a3ff";
-    const labelText = type === "fuel" ? "油箱" : type === "toolbox" ? "工具箱" : "杂物";
+    const labelColor = type === "fuel" ? "#ffcf5a" : type === "toolbox" ? "#6cf4ff" : type === "oil" ? "#7dffc0" : "#e6a3ff";
+    const labelText = type === "fuel" ? "油箱" : type === "toolbox" ? "工具箱" : type === "oil" ? "润滑油" : "杂物";
     const labelTexture = makePickupLabel(labelText, labelColor);
     const label = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -1972,6 +2027,8 @@
   function applyPickup(pickup) {
     if (pickup.type === "fuel") {
       game.fuel = clamp(game.fuel + 26, 0, 100);
+      game.fuelEmptyNotified = false;
+      if (game.fuel > 25) game.fuelHintShown = false;
       showToast("拾取油箱 · 燃油 +26", "", 1100);
       spawnFloat("+26 燃油", "cyan", -20, 4);
       playSound("near");
@@ -1979,6 +2036,16 @@
       game.integrity = clamp(game.integrity + 28, 0, 100);
       showToast("拾取工具箱 · 车况 +28", "", 1100);
       spawnFloat("+28 车况", "cyan", 20, 4);
+      playSound("near");
+    } else if (pickup.type === "oil") {
+      const boost = rand(26, 44);
+      const shift = rand(-0.9, 0.9);
+      game.speed = clamp(game.speed + boost, 0, MAX_SPEED);
+      game.playerX = clamp(game.playerX + shift, -PLAYER_LIMIT, PLAYER_LIMIT);
+      game.targetX = game.playerX;
+      game.shake = Math.min(0.5, game.shake + 0.18);
+      showToast("润滑油！车速提升并打滑偏移", "", 1200);
+      spawnFloat(`+${Math.round(boost)} 车速`, "cyan", 0, 4);
       playSound("near");
     } else {
       game.integrity = clamp(game.integrity - 18, 0, 100);
@@ -2035,11 +2102,7 @@
 
   function damageIntegrity(amount) {
     game.integrity = clamp(game.integrity - amount, 0, 100);
-    if (game.integrity <= 0) {
-      endGame("crash");
-      return true;
-    }
-    return false;
+    return game.integrity <= 0;
   }
 
   function destroyNPC(npc, points, options) {
@@ -2095,6 +2158,7 @@
       showToast(`撞上私家车！车况 -${damage}，NPC 已报废`, "alert", 1500);
       spawnFloat(`车况 -${damage}`, "red", -18, 8);
     }
+    return failed;
   }
 
   function checkNPCCollisions() {
@@ -2279,7 +2343,7 @@
     game.playerX = damp(game.playerX, targetX, 8.5, dt);
     game.playerX = clamp(game.playerX, -PLAYER_LIMIT, PLAYER_LIMIT);
     const laneDelta = targetX - game.playerX;
-    game.steerPulse = damp(game.steerPulse, 0, 8, dt);
+    game.steerPulse = damp(game.steerPulse, game.activeSteer, 12, dt);
 
     if (game.state === "running") {
       playerRoot.position.set(game.playerX, game.playerY, 0);
@@ -2311,8 +2375,9 @@
     for (const indicator of playerVehicle.indicators) {
       indicator.material.emissiveIntensity = game.steerPulse > 0.08 || game.steerPulse < -0.08 ? 0.8 + Math.sin(time * 20) * 0.6 : 0.05;
     }
+    const wheelTarget = game.activeSteer * (34 + game.steerHoldTime * 14);
     dom.steeringWheel.style.setProperty("--wheel-angle", `${game.wheelAngle}deg`);
-    game.wheelAngle = damp(game.wheelAngle, game.steerPulse * 48, 11, dt);
+    game.wheelAngle = damp(game.wheelAngle, wheelTarget, 11, dt);
   }
 
   function updateSurfaceEffects(dt) {
@@ -2350,10 +2415,11 @@
   }
 
   function updatePlayerSpeed(dt) {
-    const fuelBefore = game.fuel;
-    if (game.throttle) {
+    const hasFuel = game.fuel > 0;
+    if (game.throttle && hasFuel) {
       const acceleration = 27.5 - game.speed * 0.018;
       game.speed += acceleration * dt;
+      game.fuel -= (0.72 + game.speed * 0.0038) * dt;
     } else {
       game.speed -= (3.2 + game.speed * 0.012) * dt;
     }
@@ -2365,10 +2431,10 @@
       game.brakeForce = Math.max(0, game.brakeForce - 106 * dt);
     }
     game.speed = clamp(game.speed, 0, MAX_SPEED);
+    game.fuel = clamp(game.fuel, 0, 100);
+    if (game.fuel <= 0 && game.speed < 0.35) game.speed = 0;
     game.topSpeed = Math.max(game.topSpeed, game.speed);
     game.distance += (game.speed / 3.6) * dt;
-    game.fuel -= (0.2 + game.speed * 0.0029 + (game.throttle ? 0.54 : 0) + (game.brake ? 0.12 : 0)) * dt;
-    game.fuel = clamp(game.fuel, 0, 100);
     const overdriveBonus = Math.max(0, game.speed - SPEEDO_MAX) * 0.14;
     const drivingScore = (3 + game.speed * 0.077 + overdriveBonus) * dt;
     award(drivingScore, { energy: true, energyRate: 0.34 });
@@ -2384,11 +2450,15 @@
       endGame("brake");
       return;
     }
-    if (game.fuel <= 0 || fuelBefore <= 0) {
+    if (game.fuel <= 0 && !game.fuelEmptyNotified) {
+      game.fuelEmptyNotified = true;
+      showToast("燃油耗尽！油门失效，寻找油箱或滑行至停车", "alert", 2300);
+    }
+    if (game.fuel <= 0 && game.speed <= 0) {
       endGame("fuel");
       return;
     }
-    if (game.fuel < 22 && !game.fuelHintShown) {
+    if (game.fuel > 0 && game.fuel < 22 && !game.fuelHintShown) {
       game.fuelHintShown = true;
       showToast("燃料偏低，保持速度冲刺", "alert", 1600);
     }
@@ -2481,7 +2551,7 @@
         if (npc.dropTimer <= 0 && npc.z < -14 && npc.z > -158) {
           npc.dropTimer = rand(3.1, 5.5);
           const roll = Math.random();
-          const dropType = roll < 0.4 ? "fuel" : roll < 0.72 ? "toolbox" : "junk";
+          const dropType = roll < 0.34 ? "fuel" : roll < 0.56 ? "toolbox" : roll < 0.76 ? "oil" : "junk";
           spawnPickup(dropType, npc.x + rand(-0.24, 0.24), npc.z + npc.halfL * 0.74);
         }
       }
@@ -2535,14 +2605,19 @@
         continue;
       }
       if (dz >= npc.halfL + PLAYER_HALF_L) continue;
-      if (npc.z > 0.25) {
+      const wasRearEnded = npc.z > 0.25;
+      if (npc.type === "sedan") {
+        const destroyed = collideRegularCar(npc);
+        if (destroyed) {
+          if (wasRearEnded) endGame("rear");
+          else endGame("crash");
+          return;
+        }
+        continue;
+      }
+      if (wasRearEnded) {
         endGame("rear", { npc });
         return;
-      }
-      if (npc.type === "sedan") {
-        collideRegularCar(npc);
-        if (game.state !== "running") return;
-        continue;
       }
       endGame("crash", { npc });
       return;
@@ -2624,6 +2699,13 @@
     game.skillsUsed = 0;
     game.throttle = false;
     game.brake = false;
+    steerInput.leftTouch = false;
+    steerInput.rightTouch = false;
+    steerInput.leftKey = false;
+    steerInput.rightKey = false;
+    game.activeSteer = 0;
+    game.steerHoldTime = 0;
+    game.railOversteer = 0;
     game.targetX = 0;
     game.playerX = 0;
     game.playerY = 0;
@@ -2651,6 +2733,7 @@
     game.railSparkTimer = 0;
     game.damageSmokeTimer = 0;
     game.overdriveHintShown = false;
+    game.fuelEmptyNotified = false;
     game.hudCache = {};
     game.newBest = false;
     playerRoot.position.set(0, 0, 0);
@@ -2662,7 +2745,7 @@
     setBrake(false);
     dom.rearWarning.classList.remove("is-active");
     dom.brakeGauge.classList.remove("is-danger");
-    dom.fuelGauge.classList.remove("is-low", "is-critical");
+    dom.fuelGauge.classList.remove("is-low", "is-critical", "is-empty");
     dom.integrityGauge.classList.remove("is-low", "is-critical");
     dom.speedo.classList.remove("is-overdrive");
     updateSkillButtons(true);
@@ -2697,6 +2780,13 @@
     game.endDelay = info.delay;
     game.throttle = false;
     game.brake = false;
+    game.activeSteer = 0;
+    game.steerHoldTime = 0;
+    game.railOversteer = 0;
+    steerInput.leftTouch = false;
+    steerInput.rightTouch = false;
+    steerInput.leftKey = false;
+    steerInput.rightKey = false;
     setPedalVisual(dom.throttlePedal, false);
     setPedalVisual(dom.brakePedal, false);
     dom.hud.classList.add("is-ending");
@@ -2905,6 +2995,7 @@
       dom.fuelFill.style.width = `${fuelPercent}%`;
       dom.fuelGauge.classList.toggle("is-low", fuelPercent <= 32);
       dom.fuelGauge.classList.toggle("is-critical", fuelPercent <= 13);
+      dom.fuelGauge.classList.toggle("is-empty", fuelPercent <= 0);
     }
     const integrity = Math.round(game.integrity);
     if (game.hudCache.integrity !== integrity) {
@@ -3021,6 +3112,7 @@
         updateEngine();
         return;
       }
+      updateSteering(dt);
       updatePlayerJump(dt);
       updatePlayerVisual(dt);
       updateSurfaceEffects(dt);
@@ -3114,8 +3206,8 @@
       }
       return;
     }
-    if (key === "a" || key === "A" || key === "ArrowLeft") changeLane(-1);
-    else if (key === "d" || key === "D" || key === "ArrowRight") changeLane(1);
+    if (key === "a" || key === "A" || key === "ArrowLeft") steerInput.leftKey = true;
+    else if (key === "d" || key === "D" || key === "ArrowRight") steerInput.rightKey = true;
     else if (key === "w" || key === "W" || key === "ArrowUp") setThrottle(true);
     else if (key === "s" || key === "S" || key === "ArrowDown") setBrake(true);
     else if (key === " ") triggerHorn();
@@ -3126,6 +3218,8 @@
 
   window.addEventListener("keyup", (event) => {
     const key = event.key;
+    if (key === "a" || key === "A" || key === "ArrowLeft") steerInput.leftKey = false;
+    if (key === "d" || key === "D" || key === "ArrowRight") steerInput.rightKey = false;
     if (key === "w" || key === "W" || key === "ArrowUp") setThrottle(false);
     if (key === "s" || key === "S" || key === "ArrowDown") setBrake(false);
   });
@@ -3133,6 +3227,10 @@
   window.addEventListener("blur", () => {
     setThrottle(false);
     setBrake(false);
+    steerInput.leftTouch = false;
+    steerInput.rightTouch = false;
+    steerInput.leftKey = false;
+    steerInput.rightKey = false;
   });
 
   document.addEventListener("visibilitychange", () => {
@@ -3152,9 +3250,17 @@
     event.preventDefault();
     triggerHorn();
   });
-  dom.skillBattery.addEventListener("click", () => useSkill("battery"));
-  dom.skillJump.addEventListener("click", () => useSkill("jump"));
-  dom.skillJet.addEventListener("click", () => useSkill("jet"));
+  const bindSkill = (element, skill) => {
+    element.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      useSkill(skill);
+    });
+    element.addEventListener("contextmenu", (event) => event.preventDefault());
+  };
+  bindSkill(dom.skillBattery, "battery");
+  bindSkill(dom.skillJump, "jump");
+  bindSkill(dom.skillJet, "jet");
   dom.muteBtn.addEventListener("click", () => {
     muted = !muted;
     try {
