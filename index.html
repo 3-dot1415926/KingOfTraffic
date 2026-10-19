@@ -85,7 +85,7 @@
             <div class="speedo-hub"></div>
             <div class="speedo-read">
               <strong id="speedValue">0</strong>
-              <span>km/h</span>
+              <span id="speedUnit">km/h</span>
             </div>
           </div>
           <div class="fuel-gauge">
@@ -99,6 +99,18 @@
               <strong id="fuelValue">100%</strong>
             </div>
             <div class="fuel-track"><div class="fuel-fill" id="fuelFill"></div></div>
+          </div>
+          <div class="integrity-gauge" id="integrityGauge">
+            <div class="integrity-head">
+              <span>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 14h3l2-5 3 10 2-6h6M6 19h12M8 5l-2 2M16 5l2 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                车况
+              </span>
+              <strong id="integrityValue">100%</strong>
+            </div>
+            <div class="integrity-track"><div class="integrity-fill" id="integrityFill"></div></div>
           </div>
         </div>
 

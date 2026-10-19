@@ -2,12 +2,16 @@
   "use strict";
 
   const LANE_X = [-2.78, 0, 2.78];
-  const MAX_SPEED = 260;
+  const MAX_SPEED = 380;
+  const SPEEDO_MAX = 260;
   const BRAKE_LIMIT = 1612;
   const BRAKE_MAX = 1900;
   const SKILL_COST = { battery: 30, jump: 34, jet: 52 };
   const PLAYER_HALF_W = 0.9;
   const PLAYER_HALF_L = 1.95;
+  const PLAYER_LIMIT = 4.45;
+  const STEER_STEP = 1.55;
+  const RAIL_SPARK_X = 3.88;
 
   const $ = (id) => document.getElementById(id);
 
@@ -27,9 +31,13 @@
     speed: $("speedValue"),
     speedNeedle: $("speedNeedle"),
     speedo: $("speedo"),
+    speedUnit: $("speedUnit"),
     fuelValue: $("fuelValue"),
     fuelFill: $("fuelFill"),
     fuelGauge: document.querySelector(".fuel-gauge"),
+    integrityGauge: $("integrityGauge"),
+    integrityValue: $("integrityValue"),
+    integrityFill: $("integrityFill"),
     brakeValue: $("brakeValue"),
     brakeFill: $("brakeFill"),
     brakeGauge: $("brakeGauge"),
@@ -116,6 +124,14 @@
       sub: "被后车顶上了天际",
       special: true,
       delay: 3.6
+    },
+    rail: {
+      title: "你醒啦？",
+      tag: "特殊结局",
+      desc: "护栏撕开车门，整台车翻出公路，在爆炸中把你叫醒。",
+      sub: "护栏不是终点",
+      special: true,
+      delay: 3.6
     }
   };
 
@@ -127,14 +143,14 @@
     speed: 46,
     displaySpeed: 46,
     fuel: 100,
+    integrity: 100,
     brakeForce: 0,
     skill: 22,
     topSpeed: 0,
     skillsUsed: 0,
     throttle: false,
     brake: false,
-    lane: 1,
-    targetLane: 1,
+    targetX: 0,
     playerX: 0,
     playerY: 0,
     jumpMode: null,
@@ -161,6 +177,9 @@
     demoTrafficTimer: 0,
     fuelHintShown: false,
     batterySide: 0,
+    railSparkTimer: 0,
+    damageSmokeTimer: 0,
+    overdriveHintShown: false,
     newBest: false,
     scrollSpeed: 0,
     hudCache: {}
@@ -169,6 +188,7 @@
   let time = 0;
   let npcs = [];
   let batteries = [];
+  let pickups = [];
   let effects = [];
   let pendingEvents = [];
   let toastTimer = 0;
@@ -918,6 +938,52 @@
     };
   }
 
+  function buildHopper(paintColor) {
+    const group = new THREE.Group();
+    const paint = new THREE.MeshStandardMaterial({ color: paintColor, metalness: 0.42, roughness: 0.42, flatShading: true });
+    const hopperMaterial = new THREE.MeshStandardMaterial({ color: 0x8b8a7c, metalness: 0.35, roughness: 0.56, flatShading: true });
+    const tarpMaterial = new THREE.MeshStandardMaterial({ color: 0x2c3038, roughness: 0.86, metalness: 0.04, flatShading: true });
+    addTruckCab(group, paint, -3.0);
+    addBox(group, 2.08, 0.28, 7.7, shared.dark, 0, 0.57, 0.55);
+    addBox(group, 2.38, 1.34, 4.8, hopperMaterial, 0, 1.72, 0.95);
+    const sideLeft = addBox(group, 0.18, 1.56, 4.9, paint, -1.15, 1.28, 0.95, false);
+    sideLeft.rotation.z = -0.24;
+    const sideRight = addBox(group, 0.18, 1.56, 4.9, paint, 1.15, 1.28, 0.95, false);
+    sideRight.rotation.z = 0.24;
+    addBox(group, 2.36, 0.12, 4.95, tarpMaterial, 0, 2.46, 0.95);
+    addBox(group, 1.84, 0.18, 0.16, shared.chrome, 0, 2.54, -1.3, false);
+    addBox(group, 2.4, 0.28, 0.22, paint, 0, 0.82, 3.5);
+    addBox(group, 1.9, 0.95, 0.18, shared.dark, 0, 1.25, 3.62, false);
+    const hazard = new THREE.MeshStandardMaterial({
+      color: 0xff9a2f,
+      emissive: 0x8d3208,
+      emissiveIntensity: 0.28,
+      roughness: 0.55
+    });
+    addBox(group, 1.92, 0.1, 0.04, hazard, 0, 1.6, 3.72, false);
+    addBox(group, 1.92, 0.1, 0.04, hazard, 0, 1.24, 3.72, false);
+    addBox(group, 0.64, 0.78, 0.52, shared.dark, 0, 0.94, 3.9, false);
+    addBox(group, 0.5, 0.16, 0.56, hazard, 0, 1.36, 3.9, false);
+    const wheels = [
+      addWheel(group, -1.03, 0.43, -3.0, 0.43, 0.32),
+      addWheel(group, 1.03, 0.43, -3.0, 0.43, 0.32),
+      addWheel(group, -1.03, 0.43, 0.72, 0.43, 0.32),
+      addWheel(group, 1.03, 0.43, 0.72, 0.43, 0.32),
+      addWheel(group, -1.03, 0.43, 2.48, 0.43, 0.32),
+      addWheel(group, 1.03, 0.43, 2.48, 0.43, 0.32)
+    ];
+    const lights = addRearLights(group, 0.84, 1.0, 4.17, 1.02);
+    return {
+      group,
+      wheels,
+      halfW: 1.22,
+      halfL: 4.15,
+      indicators: [lights.indicatorL, lights.indicatorR],
+      tailMats: lights.tailMats,
+      special: "hopper"
+    };
+  }
+
   const playerRoot = new THREE.Group();
   scene.add(playerRoot);
   const playerVehicle = buildSedan(0x2f7dff, {
@@ -956,6 +1022,7 @@
     if (type === "truck") return buildTruck(paintColor);
     if (type === "tanker") return buildTanker(paintColor);
     if (type === "flatbed") return buildFlatbed(paintColor);
+    if (type === "hopper") return buildHopper(paintColor);
     return buildSedan(paintColor, {});
   }
 
@@ -992,7 +1059,11 @@
       passed: false,
       lastZ: z,
       special: vehicle.special || null,
-      hintShown: false
+      hintShown: false,
+      dropTimer: rand(2.2, 4.6),
+      wreck: false,
+      wreckAge: 0,
+      smokeTimer: 0
     };
     npcs.push(npc);
     return npc;
@@ -1005,7 +1076,9 @@
         if (child.material) {
           const materials = Array.isArray(child.material) ? child.material : [child.material];
           materials.forEach((material) => {
-            if (!sharedMaterials.has(material)) material.dispose();
+            if (sharedMaterials.has(material)) return;
+            if (material.userData && material.userData.disposeMap && material.map) material.map.dispose();
+            material.dispose();
           });
         }
       }
@@ -1025,9 +1098,10 @@
     let type = opts.type;
     if (!type) {
       const roll = Math.random();
-      if (roll < 0.1) type = "tanker";
-      else if (roll < 0.24) type = "flatbed";
-      else if (roll < 0.4) type = "truck";
+      if (roll < 0.08) type = "tanker";
+      else if (roll < 0.2) type = "flatbed";
+      else if (roll < 0.32) type = "hopper";
+      else if (roll < 0.5) type = "truck";
       else type = "sedan";
     }
     let lane = opts.lane;
@@ -1041,7 +1115,7 @@
     const z = opts.z !== undefined ? opts.z : opts.rear ? rand(19, 34) : rand(-172, -128);
     const base = opts.speed !== undefined ? opts.speed : clamp(game.speed - rand(18, 58), 32, 132);
     const speed = opts.rear ? clamp(game.speed + rand(24, 48), 62, 282) : base;
-    if (npcs.some((npc) => npc.lane === lane && Math.abs(npc.z - z) < 9.5)) return null;
+    if (npcs.some((npc) => npc.lane === lane && Math.abs(npc.z - z) < 15.5)) return null;
     const npc = makeNPC(type, lane, z, speed, opts.rear);
     if (opts.rear) npc.isRear = true;
     return npc;
@@ -1053,7 +1127,7 @@
     makeNPC("truck", 1, -78, clamp(game.speed - rand(36, 52), 28, 58));
     makeNPC("sedan", 1, -112, clamp(game.speed - rand(22, 38), 32, 64));
     makeNPC("flatbed", 0, -145, clamp(game.speed - rand(40, 55), 28, 52));
-    makeNPC("sedan", 2, -162, clamp(game.speed - rand(15, 30), 36, 70));
+    makeNPC("hopper", 2, -162, clamp(game.speed - rand(15, 30), 36, 70));
     makeNPC("tanker", 1, -196, clamp(game.speed - rand(28, 45), 32, 62));
   }
 
@@ -1071,6 +1145,14 @@
       disposeObject(battery.group);
     }
     batteries = [];
+  }
+
+  function clearPickups() {
+    for (const pickup of pickups) {
+      if (pickup.group.parent) pickup.group.parent.remove(pickup.group);
+      disposeObject(pickup.group);
+    }
+    pickups = [];
   }
 
   function clearEffects() {
@@ -1112,14 +1194,25 @@
 
   function changeLane(direction) {
     if (game.state !== "running") return;
-    const next = clamp(game.targetLane + direction, 0, 2);
-    if (next !== game.targetLane) {
-      game.targetLane = next;
-      game.steerPulse = direction;
-      playSound("lane");
+    const proposed = game.targetX + direction * STEER_STEP;
+    const atEdge = game.jumpMode === null && (direction > 0 ? game.playerX >= PLAYER_LIMIT - 0.14 : game.playerX <= -PLAYER_LIMIT + 0.14);
+    if (proposed > PLAYER_LIMIT) {
+      if (atEdge) {
+        endGame("rail", { side: 1 });
+        return;
+      }
+      game.targetX = PLAYER_LIMIT;
+    } else if (proposed < -PLAYER_LIMIT) {
+      if (atEdge) {
+        endGame("rail", { side: -1 });
+        return;
+      }
+      game.targetX = -PLAYER_LIMIT;
     } else {
-      playSound("bump");
+      game.targetX = proposed;
     }
+    game.steerPulse = direction;
+    playSound("lane");
   }
 
   function bindHold(element, onDown, onUp) {
@@ -1196,10 +1289,7 @@
     return count;
   }
 
-  function updateSkillButtons(force) {
-    const count = skillUnlockCount();
-    if (!force && game.hudCache.skillUnlock === count) return;
-    game.hudCache.skillUnlock = count;
+  function updateSkillButtons() {
     const mapping = [
       [dom.skillBattery, SKILL_COST.battery, game.jumpMode !== "jet"],
       [dom.skillJump, SKILL_COST.jump, game.jumpMode === null],
@@ -1266,7 +1356,7 @@
     let target = null;
     let targetDistance = Infinity;
     for (const npc of npcs) {
-      if (npc.z < 5 && npc.z > -45 && npc.x < game.playerX + 0.5) {
+      if (!npc.wreck && npc.group.parent && npc.z < 5 && npc.z > -45 && npc.x < game.playerX + 0.5) {
         const distance = Math.abs(npc.z) + Math.abs(npc.x - game.playerX) * 0.4;
         if (distance < targetDistance) {
           targetDistance = distance;
@@ -1695,8 +1785,10 @@
   function spawnExplosion(position, scale, options) {
     const opts = options || {};
     const explosionScale = scale || 1;
-    game.shake = Math.min(1.5, game.shake + 0.75 * explosionScale);
-    triggerFlash();
+    const playerPosition = new THREE.Vector3(game.playerX, 1 + game.playerY, 0);
+    const proximity = clamp(1 - position.distanceTo(playerPosition) / 55, 0.04, 1);
+    game.shake = Math.min(1.5, game.shake + 0.75 * explosionScale * proximity);
+    if (proximity > 0.18 && !opts.noFlash) triggerFlash();
     createFlash(position, explosionScale * 2.2);
     createShockwave(position, explosionScale * 1.4);
     for (let i = 0; i < 22; i++) {
@@ -1737,8 +1829,9 @@
     }
   }
 
-  function spawnSparks(position, color) {
-    for (let i = 0; i < 8; i++) {
+  function spawnSparks(position, color, count) {
+    const total = count || 8;
+    for (let i = 0; i < total; i++) {
       createSpriteEffect({
         map: sparkTexture,
         color: color || 0xffd36b,
@@ -1768,16 +1861,199 @@
     });
   }
 
+  function makePickupLabel(text, color) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 80;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "rgba(8,7,13,.82)";
+    ctx.beginPath();
+    ctx.roundRect(8, 8, 240, 64, 16);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.font = "800 36px 'Microsoft YaHei', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 128, 43);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  }
+
+  function createPickupVisual(type) {
+    const group = new THREE.Group();
+    const glowColor = type === "fuel" ? 0xffb33c : type === "toolbox" ? 0x58dfff : 0xb26cff;
+    if (type === "fuel") {
+      const body = new THREE.MeshStandardMaterial({ color: 0xe5452f, metalness: 0.42, roughness: 0.4, flatShading: true });
+      const cap = new THREE.MeshStandardMaterial({ color: 0xffc83d, metalness: 0.55, roughness: 0.3 });
+      addBox(group, 0.5, 0.58, 0.34, body, 0, 0, 0);
+      addBox(group, 0.16, 0.09, 0.16, cap, 0.12, 0.34, 0);
+      addBox(group, 0.36, 0.07, 0.08, shared.chrome, 0, 0.36, 0);
+      addBox(group, 0.06, 0.25, 0.08, shared.chrome, -0.18, 0.46, 0);
+      addBox(group, 0.06, 0.25, 0.08, shared.chrome, 0.18, 0.46, 0);
+    } else if (type === "toolbox") {
+      const body = new THREE.MeshStandardMaterial({ color: 0xf09a2f, metalness: 0.5, roughness: 0.35, flatShading: true });
+      addBox(group, 0.62, 0.38, 0.42, body, 0, 0, 0);
+      addBox(group, 0.66, 0.08, 0.46, shared.chrome, 0, 0.22, 0);
+      addBox(group, 0.36, 0.08, 0.07, shared.chrome, 0, 0.32, 0);
+      addBox(group, 0.07, 0.2, 0.07, shared.chrome, -0.16, 0.4, 0);
+      addBox(group, 0.07, 0.2, 0.07, shared.chrome, 0.16, 0.4, 0);
+    } else {
+      const scrap = new THREE.MeshStandardMaterial({ color: 0x6a6572, metalness: 0.25, roughness: 0.85, flatShading: true });
+      const chunkA = new THREE.Mesh(new THREE.DodecahedronGeometry(0.34, 0), scrap);
+      chunkA.position.set(-0.08, 0.02, 0);
+      chunkA.rotation.set(0.5, 0.8, 0.2);
+      group.add(chunkA);
+      const chunkB = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.22, 0.5), scrap);
+      chunkB.position.set(0.16, 0.08, 0.04);
+      chunkB.rotation.set(0.2, 0.3, -0.4);
+      group.add(chunkB);
+      addBox(group, 0.55, 0.05, 0.06, shared.chrome, 0, 0.18, 0.1, false);
+    }
+    const labelColor = type === "fuel" ? "#ffcf5a" : type === "toolbox" ? "#6cf4ff" : "#e6a3ff";
+    const labelText = type === "fuel" ? "油箱" : type === "toolbox" ? "工具箱" : "杂物";
+    const labelTexture = makePickupLabel(labelText, labelColor);
+    const label = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: labelTexture,
+        transparent: true,
+        depthWrite: false
+      })
+    );
+    label.material.userData.disposeMap = true;
+    label.position.y = 0.8;
+    label.scale.set(1.45, 0.45, 1);
+    group.add(label);
+    const glow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowTexture,
+        color: glowColor,
+        transparent: true,
+        opacity: 0.42,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    glow.scale.set(1.5, 1.5, 1);
+    glow.position.y = 0.15;
+    group.add(glow);
+    return group;
+  }
+
+  function spawnPickup(type, x, z) {
+    if (pickups.length >= 16) return null;
+    const group = createPickupVisual(type);
+    group.position.set(x, 0.62, z);
+    scene.add(group);
+    const pickup = {
+      type,
+      x,
+      z,
+      group,
+      bob: rand(0, Math.PI * 2),
+      spin: rand(1.4, 3),
+      age: 0
+    };
+    pickups.push(pickup);
+    return pickup;
+  }
+
+  function removePickup(index) {
+    const pickup = pickups[index];
+    if (!pickup) return;
+    if (pickup.group.parent) pickup.group.parent.remove(pickup.group);
+    disposeObject(pickup.group);
+    pickups.splice(index, 1);
+  }
+
+  function applyPickup(pickup) {
+    if (pickup.type === "fuel") {
+      game.fuel = clamp(game.fuel + 26, 0, 100);
+      showToast("拾取油箱 · 燃油 +26", "", 1100);
+      spawnFloat("+26 燃油", "cyan", -20, 4);
+      playSound("near");
+    } else if (pickup.type === "toolbox") {
+      game.integrity = clamp(game.integrity + 28, 0, 100);
+      showToast("拾取工具箱 · 车况 +28", "", 1100);
+      spawnFloat("+28 车况", "cyan", 20, 4);
+      playSound("near");
+    } else {
+      game.integrity = clamp(game.integrity - 18, 0, 100);
+      game.speed *= 0.55;
+      game.shake = Math.min(1.2, game.shake + 0.32);
+      spawnSparks(new THREE.Vector3(game.playerX, 0.7, 0.8), 0xffb04a, 7);
+      showToast("轧到杂物！车况 -18，速度骤降", "alert", 1400);
+      spawnFloat("车况 -18", "red", 0, 3);
+      playSound("bump");
+      if (game.integrity <= 0) endGame("crash");
+    }
+  }
+
+  function updatePickups(dt, speed) {
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const pickup = pickups[i];
+      pickup.age += dt;
+      pickup.z += (speed / 3.6) * dt;
+      pickup.group.position.z = pickup.z;
+      pickup.group.position.y = 0.62 + Math.sin(time * 4 + pickup.bob) * 0.1;
+      pickup.group.rotation.y += pickup.spin * dt;
+      if (game.state === "running" && game.playerY < 1.5 && Math.abs(pickup.z) < 2.2 && Math.abs(pickup.x - game.playerX) < 1.25) {
+        applyPickup(pickup);
+        removePickup(i);
+        continue;
+      }
+      if (pickup.z > 18) removePickup(i);
+    }
+  }
+
+  function wreckNPC(npc) {
+    if (!npc || npc.wreck) return false;
+    npc.wreck = true;
+    npc.wreckAge = 0;
+    npc.smokeTimer = 0;
+    npc.signalOn = false;
+    npc.targetX = npc.x;
+    npc.speed = Math.max(7, npc.speed * 0.42);
+    npc.group.rotation.z = rand(-0.16, 0.16);
+    npc.group.rotation.y += rand(-0.25, 0.25);
+    npc.group.traverse((child) => {
+      if (!child.isMesh || !child.material) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((material) => {
+        if (sharedMaterials.has(material)) return;
+        if (material.color) material.color.multiplyScalar(0.24);
+        if (material.emissive) material.emissive.multiplyScalar(0.08);
+        if ("emissiveIntensity" in material) material.emissiveIntensity = 0;
+        material.needsUpdate = true;
+      });
+    });
+    return true;
+  }
+
+  function damageIntegrity(amount) {
+    game.integrity = clamp(game.integrity - amount, 0, 100);
+    if (game.integrity <= 0) {
+      endGame("crash");
+      return true;
+    }
+    return false;
+  }
+
   function destroyNPC(npc, points, options) {
+    if (!npc || npc.wreck) return;
     const opts = options || {};
     const position = npc.group.position.clone();
     position.y = 1.1;
-    if (npc.special === "tanker") {
+    const isTanker = npc.special === "tanker";
+    wreckNPC(npc);
+    if (isTanker) {
       chainExplosion(position, 2.15);
     } else {
       spawnExplosion(position, opts.scale || 1, { big: false });
     }
-    removeNPC(npc);
     if (points) {
       award(points, { energy: true, floatText: opts.label || `+${points}`, floatType: "cyan", offsetY: opts.offsetY || 0 });
     }
@@ -1787,17 +2063,62 @@
   function chainExplosion(position, scale) {
     spawnExplosion(position, scale || 1.4, { big: true });
     const victims = npcs.filter((npc) => {
-      return npc.group.position.distanceTo(position) < 21;
+      return !npc.wreck && npc.group.parent && npc.group.position.distanceTo(position) < 21;
     });
     for (const npc of victims) {
-      const delayedPosition = npc.group.position.clone();
       addEvent(rand(0.16, 0.72), () => {
-        if (!npc.group.parent) return;
+        if (!npc.group.parent || npc.wreck) return;
+        const delayedPosition = npc.group.position.clone();
         delayedPosition.y = 1.1;
+        wreckNPC(npc);
         spawnExplosion(delayedPosition, rand(0.9, 1.5), { silent: true });
-        removeNPC(npc);
         award(120, { energy: false, floatText: "+120", floatType: "cyan", offsetY: -18 });
       });
+    }
+  }
+
+  function collideRegularCar(npc) {
+    const damage = Math.round(24 + game.speed * 0.045);
+    const position = new THREE.Vector3(game.playerX, 0.72, 0.7);
+    game.speed = Math.max(16, game.speed * 0.54);
+    game.invulnerable = 1.6;
+    game.shake = Math.min(1.5, game.shake + 0.85);
+    const explosionPosition = npc.group.position.clone();
+    explosionPosition.y = 1.1;
+    wreckNPC(npc);
+    spawnExplosion(explosionPosition, 1.12, { big: false });
+    spawnSparks(position, 0xffb257, 12);
+    playSound("crash");
+    triggerFlash();
+    const failed = damageIntegrity(damage);
+    if (!failed) {
+      showToast(`撞上私家车！车况 -${damage}，NPC 已报废`, "alert", 1500);
+      spawnFloat(`车况 -${damage}`, "red", -18, 8);
+    }
+  }
+
+  function checkNPCCollisions() {
+    for (let i = 0; i < npcs.length; i++) {
+      const a = npcs[i];
+      if (a.wreck || !a.group.parent) continue;
+      for (let j = i + 1; j < npcs.length; j++) {
+        const b = npcs[j];
+        if (b.wreck || !b.group.parent) continue;
+        const dx = Math.abs(a.x - b.x);
+        const dz = Math.abs(a.z - b.z);
+        if (dx >= (a.halfW + b.halfW) * 0.88) continue;
+        if (dz >= (a.halfL + b.halfL) * 0.84) continue;
+        const position = new THREE.Vector3((a.x + b.x) * 0.5, 1.1, (a.z + b.z) * 0.5);
+        const hasTanker = a.special === "tanker" || b.special === "tanker";
+        wreckNPC(a);
+        wreckNPC(b);
+        if (hasTanker) {
+          chainExplosion(position, 1.9);
+        } else {
+          spawnExplosion(position, 1.05, { big: false });
+        }
+        break;
+      }
     }
   }
 
@@ -1849,7 +2170,7 @@
       }
       let hit = false;
       for (const npc of npcs.slice()) {
-        if (!npc.group.parent) continue;
+        if (!npc.group.parent || npc.wreck) continue;
         const dx = Math.abs(battery.group.position.x - npc.group.position.x);
         const dz = Math.abs(battery.group.position.z - npc.group.position.z);
         if (dx < npc.halfW + 0.5 && dz < npc.halfL + 0.5) {
@@ -1954,8 +2275,9 @@
   }
 
   function updatePlayerVisual(dt) {
-    const targetX = LANE_X[game.targetLane];
+    const targetX = game.targetX;
     game.playerX = damp(game.playerX, targetX, 8.5, dt);
+    game.playerX = clamp(game.playerX, -PLAYER_LIMIT, PLAYER_LIMIT);
     const laneDelta = targetX - game.playerX;
     game.steerPulse = damp(game.steerPulse, 0, 8, dt);
 
@@ -1993,6 +2315,40 @@
     game.wheelAngle = damp(game.wheelAngle, game.steerPulse * 48, 11, dt);
   }
 
+  function updateSurfaceEffects(dt) {
+    if (game.state !== "running") return;
+    if (Math.abs(game.playerX) > RAIL_SPARK_X && game.jumpMode === null) {
+      game.railSparkTimer -= dt;
+      if (game.railSparkTimer <= 0) {
+        const side = Math.sign(game.playerX);
+        game.railSparkTimer = rand(0.055, 0.09);
+        const position = new THREE.Vector3(side * (PLAYER_LIMIT + PLAYER_HALF_W - 0.12), 0.34, rand(0.25, 1.35));
+        spawnSparks(position, 0xff9d3d, 3);
+        game.shake = Math.min(0.34, game.shake + 0.035);
+      }
+    } else {
+      game.railSparkTimer = 0;
+    }
+    if (game.integrity < 45) {
+      game.damageSmokeTimer -= dt;
+      if (game.damageSmokeTimer <= 0) {
+        game.damageSmokeTimer = game.integrity < 22 ? 0.12 : 0.27;
+        createSpriteEffect({
+          map: smokeTexture,
+          color: 0x4c4952,
+          position: new THREE.Vector3(game.playerX + rand(-0.45, 0.45), 1.05, -1.45),
+          scale: rand(0.34, 0.7),
+          velocity: new THREE.Vector3(rand(-0.4, 0.4), rand(0.7, 1.6), rand(-0.4, 0.3)),
+          gravity: -0.2,
+          life: rand(0.7, 1.4),
+          grow: 1.7,
+          opacity: 0.34,
+          additive: false
+        });
+      }
+    }
+  }
+
   function updatePlayerSpeed(dt) {
     const fuelBefore = game.fuel;
     if (game.throttle) {
@@ -2013,8 +2369,13 @@
     game.distance += (game.speed / 3.6) * dt;
     game.fuel -= (0.2 + game.speed * 0.0029 + (game.throttle ? 0.54 : 0) + (game.brake ? 0.12 : 0)) * dt;
     game.fuel = clamp(game.fuel, 0, 100);
-    const drivingScore = (3 + game.speed * 0.077) * dt;
+    const overdriveBonus = Math.max(0, game.speed - SPEEDO_MAX) * 0.14;
+    const drivingScore = (3 + game.speed * 0.077 + overdriveBonus) * dt;
     award(drivingScore, { energy: true, energyRate: 0.34 });
+    if (game.speed > SPEEDO_MAX && !game.overdriveHintShown) {
+      game.overdriveHintShown = true;
+      showToast("突破表盘上限！极速状态得分额外提升", "", 1800);
+    }
     const wheelDustChance = game.speed > 105 ? 0.55 : 0.16;
     if (Math.random() < wheelDustChance * dt * 6) {
       spawnDust(new THREE.Vector3(game.playerX + (Math.random() < 0.5 ? -0.85 : 0.85), 0.12, 1.5));
@@ -2062,7 +2423,7 @@
     const targetAngle = close ? 0.39 : -0.035;
     npc.rampPivot.rotation.x = damp(npc.rampPivot.rotation.x, targetAngle, 2.5, dt);
     npc.rampReady = npc.rampPivot.rotation.x > 0.27;
-    if (npc.rampReady && !npc.hintShown && game.state === "running" && npc.z > -70 && npc.z < -25 && npc.x === game.playerX) {
+    if (npc.rampReady && !npc.hintShown && game.state === "running" && npc.z > -70 && npc.z < -25 && Math.abs(npc.x - game.playerX) < 1.6) {
       npc.hintShown = true;
       showToast("平板挂车已放下斜坡，全速冲上去！", "", 2100);
     }
@@ -2075,9 +2436,30 @@
       npc.lastZ = npc.z;
       const relativeSpeed = (activeSpeed - npc.speed) / 3.6;
       npc.z += relativeSpeed * dt;
-      npc.x = damp(npc.x, npc.targetX, npc.signalOn ? 4.2 : 5.5, dt);
+      if (!npc.wreck) npc.x = damp(npc.x, npc.targetX, npc.signalOn ? 4.2 : 5.5, dt);
       npc.group.position.x = npc.x;
       npc.group.position.z = npc.z;
+      if (npc.wreck) {
+        npc.wreckAge += dt;
+        npc.smokeTimer -= dt;
+        if (npc.smokeTimer <= 0) {
+          npc.smokeTimer = rand(0.12, 0.28);
+          createSpriteEffect({
+            map: smokeTexture,
+            color: pick([0x34313b, 0x4b4650, 0x25232c]),
+            position: new THREE.Vector3(npc.x + rand(-0.5, 0.5), 1.05 + rand(0, 1.2), npc.z + rand(-0.7, 0.7)),
+            scale: rand(0.45, 1.05),
+            velocity: new THREE.Vector3(rand(-0.5, 0.5), rand(0.5, 1.5), rand(-0.3, 0.5)),
+            gravity: -0.22,
+            life: rand(0.7, 1.5),
+            grow: 1.9,
+            opacity: 0.34,
+            additive: false
+          });
+        }
+        if (npc.z > 56 || npc.z < -210) removeNPC(npc);
+        continue;
+      }
       const wheelSpin = (npc.speed / 3.6) * dt / 0.42;
       for (const wheel of npc.wheels) wheel.rotation.x += wheelSpin;
       updateFlatbed(npc, dt);
@@ -2093,6 +2475,15 @@
       } else {
         npc.indicators[0].material.emissiveIntensity = 0.05;
         npc.indicators[1].material.emissiveIntensity = 0.05;
+      }
+      if (active && npc.type === "hopper") {
+        npc.dropTimer -= dt;
+        if (npc.dropTimer <= 0 && npc.z < -14 && npc.z > -158) {
+          npc.dropTimer = rand(3.1, 5.5);
+          const roll = Math.random();
+          const dropType = roll < 0.4 ? "fuel" : roll < 0.72 ? "toolbox" : "junk";
+          spawnPickup(dropType, npc.x + rand(-0.24, 0.24), npc.z + npc.halfL * 0.74);
+        }
       }
       if (active) {
         npc.actionTimer -= dt;
@@ -2115,12 +2506,14 @@
   }
 
   function detectNearMiss(npc) {
-    if (npc.passed) return;
+    if (npc.passed || npc.wreck) return;
     if (npc.lastZ < 0 && npc.z >= 0) {
       npc.passed = true;
       const lateral = Math.abs(npc.x - game.playerX);
-      if (lateral > 1.35 && lateral < 4.1 && npc.z < 3.5) {
-        const points = Math.round(55 + game.speed * 0.13);
+      const collisionLateral = npc.halfW + PLAYER_HALF_W * 0.88;
+      const gap = lateral - collisionLateral;
+      if (gap > 0.01 && gap < 0.62 && npc.z < 3.5) {
+        const points = Math.round(60 + game.speed * 0.15 + (0.62 - gap) * 70);
         award(points, { energy: true, energyRate: 0.22, floatText: `擦肩 +${points}`, floatType: "cyan", offsetY: rand(-12, 12) });
         playSound("near");
       }
@@ -2131,7 +2524,7 @@
     if (game.state !== "running") return;
     for (let i = npcs.length - 1; i >= 0; i--) {
       const npc = npcs[i];
-      if (!npc.group.parent) continue;
+      if (!npc.group.parent || npc.wreck) continue;
       detectNearMiss(npc);
       if (game.invulnerable > 0 || game.playerY > 1.2) continue;
       const dx = Math.abs(npc.x - game.playerX);
@@ -2146,6 +2539,11 @@
         endGame("rear", { npc });
         return;
       }
+      if (npc.type === "sedan") {
+        collideRegularCar(npc);
+        if (game.state !== "running") return;
+        continue;
+      }
       endGame("crash", { npc });
       return;
     }
@@ -2155,7 +2553,7 @@
     let danger = false;
     let nearest = null;
     for (const npc of npcs) {
-      if (npc.z > 2.5 && npc.z < 34 && Math.abs(npc.x - game.playerX) < 2.4) {
+      if (!npc.wreck && npc.z > 2.5 && npc.z < 34 && Math.abs(npc.x - game.playerX) < 2.4) {
         const closing = npc.speed > game.speed + 6;
         if (closing && (!nearest || npc.z < nearest.z)) {
           nearest = npc;
@@ -2177,7 +2575,7 @@
     let target = null;
     let distance = Infinity;
     for (const npc of npcs) {
-      if (npc.z < -2 && npc.z > -105) {
+      if (!npc.wreck && npc.z < -2 && npc.z > -105) {
         const candidateDistance = -npc.z;
         if (candidateDistance < distance) {
           distance = candidateDistance;
@@ -2210,6 +2608,7 @@
   function resetGame() {
     clearNPCs();
     clearEffects();
+    clearPickups();
     resetBatteries();
     pendingEvents = [];
     game.elapsed = 0;
@@ -2218,14 +2617,14 @@
     game.speed = 74;
     game.displaySpeed = 74;
     game.fuel = 100;
+    game.integrity = 100;
     game.brakeForce = 0;
     game.skill = 22;
     game.topSpeed = 74;
     game.skillsUsed = 0;
     game.throttle = false;
     game.brake = false;
-    game.lane = 1;
-    game.targetLane = 1;
+    game.targetX = 0;
     game.playerX = 0;
     game.playerY = 0;
     game.jumpMode = null;
@@ -2249,6 +2648,9 @@
     game.rearDanger = false;
     game.rearSpawnTimer = rand(8, 11);
     game.spawnTimer = 1.1;
+    game.railSparkTimer = 0;
+    game.damageSmokeTimer = 0;
+    game.overdriveHintShown = false;
     game.hudCache = {};
     game.newBest = false;
     playerRoot.position.set(0, 0, 0);
@@ -2261,6 +2663,8 @@
     dom.rearWarning.classList.remove("is-active");
     dom.brakeGauge.classList.remove("is-danger");
     dom.fuelGauge.classList.remove("is-low", "is-critical");
+    dom.integrityGauge.classList.remove("is-low", "is-critical");
+    dom.speedo.classList.remove("is-overdrive");
     updateSkillButtons(true);
   }
 
@@ -2323,13 +2727,19 @@
       game.endDriftX = rand(-1, 1);
       game.endDriftZ = rand(-1, 1);
       const position = new THREE.Vector3(game.playerX, 1 + game.playerY, 0);
-      if (opts.npc && opts.npc.special === "tanker") {
-        description = "你撞上了油罐车，爆炸点燃了整条公路。";
-        chainExplosion(opts.npc.group.position.clone().setY(1.2), 2.1);
-        removeNPC(opts.npc);
-      } else {
-        spawnExplosion(position, 1.25, { big: false });
+      if (opts.npc) {
+        const npcPosition = opts.npc.group.position.clone();
+        npcPosition.y = 1.1;
+        const isTanker = opts.npc.special === "tanker";
+        wreckNPC(opts.npc);
+        if (isTanker) {
+          description = "你撞上了油罐车，爆炸点燃了整条公路。";
+          chainExplosion(npcPosition, 2.1);
+        } else {
+          spawnExplosion(npcPosition, 1.2, { silent: true });
+        }
       }
+      spawnExplosion(position, 1.25, { big: false });
       playSound("crash");
       triggerFlash();
     } else if (type === "rear") {
@@ -2346,9 +2756,23 @@
       if (opts.npc) {
         const source = opts.npc.group.position.clone();
         source.y = 1;
+        wreckNPC(opts.npc);
         spawnExplosion(source, 0.8, { silent: true });
-        removeNPC(opts.npc);
       }
+    } else if (type === "rail") {
+      const side = opts.side || (game.playerX >= 0 ? 1 : -1);
+      game.endLaunchVy = 10.8;
+      game.endSpinX = 3.4;
+      game.endSpinY = 2.5;
+      game.endSpinZ = 5.6;
+      game.endDriftX = side * 7.5;
+      game.endDriftZ = 0;
+      spawnSparks(new THREE.Vector3(game.playerX + side * 0.7, 0.5, 0.7), 0xffa542, 18);
+      addEvent(0.24, () => {
+        const explosionPosition = new THREE.Vector3(game.playerX, 1.2 + game.playerY, 0);
+        spawnExplosion(explosionPosition, 1.55, { big: true });
+        playSound("explosion");
+      });
     } else if (type === "fuel") {
       game.endLaunchVy = 0;
       game.endSpinX = 0;
@@ -2360,9 +2784,6 @@
       playSound("deny");
     }
     game.endDescription = description;
-    if (opts.npc && type === "crash") {
-      if (opts.npc.group && opts.npc.group.parent) removeNPC(opts.npc);
-    }
     spawnFloat(info.title, "", 0, -18);
   }
 
@@ -2417,7 +2838,8 @@
 
   function updateEnding(dt) {
     game.endTimer += dt;
-    if (game.endType === "brake" || game.endType === "crash") {
+    if (game.endType === "brake" || game.endType === "crash" || game.endType === "rail") {
+      if (game.endType === "rail") game.endDriftX = damp(game.endDriftX, 0, 0.9, dt);
       if (game.endLaunchVy > 0 || game.playerY > 0) {
         game.playerY += game.endLaunchVy * dt;
         game.endLaunchVy -= 7.6 * dt;
@@ -2463,15 +2885,18 @@
       dom.score.textContent = score.toLocaleString("en-US");
     }
     game.displaySpeed = damp(game.displaySpeed, game.speed, 8, 1 / 60);
-    const speed = Math.round(game.displaySpeed);
+    const overdrive = game.displaySpeed > SPEEDO_MAX + 0.5;
+    const speed = Math.round(Math.min(game.displaySpeed, SPEEDO_MAX));
     if (game.hudCache.speed !== speed) {
       game.hudCache.speed = speed;
       dom.speed.textContent = speed;
-      const ratio = clamp(speed / MAX_SPEED, 0, 1);
+      const ratio = clamp(speed / SPEEDO_MAX, 0, 1);
       dom.speedNeedle.style.setProperty("--angle", `${-140 + ratio * 280}deg`);
       dom.speedo.style.setProperty("--sweep", `${ratio * 280}deg`);
-      dom.speedFx.style.opacity = String(clamp((speed - 118) / 180, 0, 0.42));
     }
+    dom.speedo.classList.toggle("is-overdrive", overdrive);
+    dom.speedUnit.textContent = overdrive ? "OVERDRIVE" : "km/h";
+    dom.speedFx.style.opacity = String(clamp((game.displaySpeed - 118) / 200, 0, 0.42) + (overdrive ? 0.12 : 0));
     const fuel = Math.max(0, game.fuel);
     const fuelPercent = Math.round(fuel);
     if (game.hudCache.fuel !== fuelPercent) {
@@ -2480,6 +2905,14 @@
       dom.fuelFill.style.width = `${fuelPercent}%`;
       dom.fuelGauge.classList.toggle("is-low", fuelPercent <= 32);
       dom.fuelGauge.classList.toggle("is-critical", fuelPercent <= 13);
+    }
+    const integrity = Math.round(game.integrity);
+    if (game.hudCache.integrity !== integrity) {
+      game.hudCache.integrity = integrity;
+      dom.integrityValue.textContent = `${integrity}%`;
+      dom.integrityFill.style.width = `${integrity}%`;
+      dom.integrityGauge.classList.toggle("is-low", integrity <= 50);
+      dom.integrityGauge.classList.toggle("is-critical", integrity <= 22);
     }
     const brake = Math.round(game.brakeForce);
     if (game.hudCache.brake !== brake) {
@@ -2493,9 +2926,9 @@
       game.hudCache.skill = skill;
       dom.skillPercent.innerHTML = `${skill}<small>%</small>`;
       dom.skillFill.style.height = `${skill}%`;
-      updateSkillButtons(false);
-      animateUnlockPulse();
     }
+    updateSkillButtons();
+    animateUnlockPulse();
     if (game.hornCooldown > 0) {
       game.hornCooldown = Math.max(0, game.hornCooldown - 1 / 60);
       dom.hornBtn.style.opacity = game.hornCooldown > 0 ? "0.55" : "";
@@ -2534,7 +2967,7 @@
     const shakeX = (Math.random() - 0.5) * shake * 0.75;
     const shakeY = (Math.random() - 0.5) * shake * 0.55;
     game.shake = Math.max(0, game.shake - dt * 2.4);
-    const speedRatio = clamp(game.displaySpeed / MAX_SPEED, 0, 1);
+    const speedRatio = clamp(game.displaySpeed / SPEEDO_MAX, 0, 1);
     if (game.state === "welcome") {
       const targetX = Math.sin(time * 0.18) * 1.2;
       camera.position.x = damp(camera.position.x, targetX, 1.6, dt);
@@ -2590,19 +3023,25 @@
       }
       updatePlayerJump(dt);
       updatePlayerVisual(dt);
+      updateSurfaceEffects(dt);
       updateNPCs(dt, game.speed);
+      checkNPCCollisions();
       game.spawnTimer -= dt;
       if (game.spawnTimer <= 0) {
         game.spawnTimer = rand(0.82, 1.55) * clamp(1.2 - game.elapsed * 0.008, 0.72, 1.15);
-        const aheadCount = npcs.filter((npc) => npc.z < -6).length;
+        const aheadCount = npcs.filter((npc) => npc.z < -6 && !npc.wreck).length;
         if (aheadCount < 9) spawnNPC();
       }
       game.rearSpawnTimer -= dt;
       if (game.rearSpawnTimer <= 0) {
         game.rearSpawnTimer = rand(12, 17);
-        const rearExists = npcs.some((npc) => npc.z > 4 && npc.z < 46);
+        const rearExists = npcs.some((npc) => npc.z > 4 && npc.z < 46 && !npc.wreck);
         if (!rearExists) {
-          const lane = Math.random() < 0.62 ? game.targetLane : randInt(0, 2);
+          let playerLane = 0;
+          for (let i = 1; i < LANE_X.length; i++) {
+            if (Math.abs(LANE_X[i] - game.playerX) < Math.abs(LANE_X[playerLane] - game.playerX)) playerLane = i;
+          }
+          const lane = Math.random() < 0.62 ? playerLane : randInt(0, 2);
           const rearCar = spawnNPC({ rear: true, lane, z: rand(24, 36) });
           if (rearCar) {
             rearCar.isRear = true;
@@ -2612,6 +3051,7 @@
       }
       checkCollisions();
       updateBatteries(dt);
+      updatePickups(dt, game.speed);
       updateRearWarning();
       updateRoad(dt, game.speed);
     } else if (game.state === "ending") {
@@ -2620,12 +3060,14 @@
       updatePlayerVisual(dt);
       updateNPCs(dt, Math.max(0, game.speed * 0.62));
       updateBatteries(dt);
+      updatePickups(dt, Math.max(0, game.speed * 0.62));
       updateRoad(dt, Math.max(8, game.speed * 0.55));
       if (game.endType !== "rear") {
         game.speed = Math.max(0, game.speed - 6 * dt);
       }
     } else if (game.state === "results") {
       updateBatteries(dt);
+      updatePickups(dt, 8);
       updateNPCs(dt, 8);
       updateRoad(dt, 8);
       game.shake = Math.max(0, game.shake - dt * 2);

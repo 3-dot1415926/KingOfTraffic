@@ -619,6 +619,97 @@ svg {
   animation: fuel-pulse 0.55s ease-in-out infinite alternate;
 }
 
+.integrity-gauge {
+  margin-top: 5px;
+  padding: 7px 9px 8px;
+  border-radius: 10px;
+  background: rgba(9, 8, 15, 0.72);
+  border: 1px solid rgba(255, 244, 216, 0.1);
+  box-shadow: 0 9px 22px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(9px);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.integrity-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 5px;
+  font-family: var(--num);
+  color: rgba(255, 243, 216, 0.5);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.integrity-head > span {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.integrity-head svg {
+  width: 10px;
+  height: 10px;
+  color: #7adfff;
+}
+
+.integrity-head strong {
+  color: var(--cream);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.integrity-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2) inset;
+}
+
+.integrity-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #38c87d, #a8ff63);
+  box-shadow: 0 0 12px rgba(120, 255, 150, 0.32);
+  transition: width 0.2s linear, background 0.3s ease;
+}
+
+.integrity-gauge.is-low {
+  border-color: rgba(255, 180, 74, 0.32);
+}
+
+.integrity-gauge.is-low .integrity-fill {
+  background: linear-gradient(90deg, #ff9f37, #ffcb52);
+}
+
+.integrity-gauge.is-critical {
+  border-color: rgba(255, 76, 85, 0.52);
+  animation: integrity-warning 0.4s ease-in-out infinite alternate;
+}
+
+.integrity-gauge.is-critical .integrity-fill {
+  background: linear-gradient(90deg, #ff2e42, #ff7d46);
+}
+
+.speedo.is-overdrive {
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.34),
+    0 0 38px rgba(255, 65, 55, 0.42);
+  animation: overdrive-glow 0.45s ease-in-out infinite alternate;
+}
+
+.speedo.is-overdrive .speedo-read span {
+  color: #ff7260;
+  text-shadow: 0 0 10px rgba(255, 71, 55, 0.5);
+}
+
 .rear-warning {
   position: absolute;
   left: 50%;
@@ -660,7 +751,7 @@ svg {
 .toast {
   position: absolute;
   left: 50%;
-  top: 31%;
+  top: 43%;
   padding: 9px 16px;
   border-radius: 999px;
   background: rgba(12, 10, 18, 0.84);
@@ -1695,6 +1786,24 @@ svg {
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes integrity-warning {
+  from {
+    box-shadow: 0 9px 22px rgba(0, 0, 0, 0.24), 0 0 0 rgba(255, 65, 74, 0);
+  }
+  to {
+    box-shadow: 0 9px 22px rgba(0, 0, 0, 0.24), 0 0 18px rgba(255, 65, 74, 0.38);
+  }
+}
+
+@keyframes overdrive-glow {
+  from {
+    filter: brightness(1);
+  }
+  to {
+    filter: brightness(1.14);
   }
 }
 
