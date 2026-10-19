@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#120f1f">
+  <title>公路之王 | King of the Highway</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="app">
+    <section id="game" aria-label="公路之王 3D 驾驶游戏">
+      <canvas id="scene"></canvas>
+
+      <div class="fx-layer" aria-hidden="true">
+        <div id="speedFx" class="speed-fx"></div>
+        <div class="vignette"></div>
+        <div class="scanlines"></div>
+        <div id="hitFlash" class="hit-flash"></div>
+      </div>
+
+      <div id="hud" class="hud is-hidden">
+        <header class="topbar">
+          <div class="mini-brand">
+            <svg viewBox="0 0 32 24" aria-hidden="true">
+              <path d="M2 19 7 6l5 7 4-10 4 10 5-7 5 13Z" fill="currentColor"/>
+              <path d="M4 21h24" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span>公路之王</span>
+          </div>
+
+          <div class="scoreboard">
+            <span class="score-label">SCORE</span>
+            <strong id="scoreValue">0</strong>
+          </div>
+
+          <div class="top-actions">
+            <div class="best-chip"><span>BEST</span><strong id="bestValue">0</strong></div>
+            <button id="muteBtn" class="icon-btn" type="button" aria-label="静音">
+              <svg class="sound-on" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/>
+                <path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+              <svg class="sound-off" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 9v6h4l5 4V5L8 9H4Z" fill="currentColor"/>
+                <path d="m16 9 5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="side-gauges">
+          <div class="v-gauge brake-gauge" id="brakeGauge">
+            <div class="v-gauge-head">
+              <span>刹车力</span>
+              <strong id="brakeValue">0<small>N</small></strong>
+            </div>
+            <div class="v-track">
+              <div class="v-fill" id="brakeFill"></div>
+              <div class="v-segments"></div>
+              <div class="threshold-tick">
+                <span>1612</span>
+              </div>
+            </div>
+            <div class="v-gauge-foot">FORCE</div>
+          </div>
+
+          <div class="v-gauge skill-gauge">
+            <div class="v-gauge-head">
+              <span>充能</span>
+              <strong id="skillPercent">0<small>%</small></strong>
+            </div>
+            <div class="v-track">
+              <div class="v-fill" id="skillFill"></div>
+              <div class="v-segments"></div>
+            </div>
+            <div class="v-gauge-foot">BOOST</div>
+          </div>
+        </div>
+
+        <div class="speed-cluster">
+          <div class="speedo" id="speedo">
+            <div class="speedo-ticks"></div>
+            <div class="speedo-needle" id="speedNeedle"></div>
+            <div class="speedo-hub"></div>
+            <div class="speedo-read">
+              <strong id="speedValue">0</strong>
+              <span>km/h</span>
+            </div>
+          </div>
+          <div class="fuel-gauge">
+            <div class="fuel-head">
+              <span>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M4 21h12M5 11h10M16 8h2l2 3v7a2 2 0 0 1-4 0v-4h-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                FUEL
+              </span>
+              <strong id="fuelValue">100%</strong>
+            </div>
+            <div class="fuel-track"><div class="fuel-fill" id="fuelFill"></div></div>
+          </div>
+        </div>
+
+        <div id="rearWarning" class="rear-warning">
+          <span></span>
+          后方快车逼近
+        </div>
+
+        <div id="toast" class="toast"></div>
+        <div id="floatLayer" class="float-layer"></div>
+
+        <div class="bottom-ui">
+          <div class="action-rail">
+            <button id="hornBtn" class="action-btn horn-btn" type="button" aria-label="鸣笛">
+              <span class="action-icon">
+                <svg viewBox="0 0 32 32" aria-hidden="true">
+                  <path d="M5 13v6h4l7 5V8l-7 5H5Z" fill="currentColor"/>
+                  <path d="M20 11c2 2 2 8 0 10M24 8c4 4 4 12 0 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="action-name">鸣笛</span>
+              <span class="action-meta">惊扰前车</span>
+            </button>
+
+            <button class="action-btn skill-btn" id="skillBattery" data-skill="battery" type="button">
+              <span class="action-icon">
+                <svg viewBox="0 0 32 32" aria-hidden="true">
+                  <rect x="8" y="8" width="16" height="20" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+                  <path d="M12 8V5h3v3M17 8V5h3v3M13 14h6M13 19h6M13 24h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="action-name">弹射电池</span>
+              <span class="action-meta"><b>30</b> 能量</span>
+            </button>
+
+            <button class="action-btn skill-btn" id="skillJump" data-skill="jump" type="button">
+              <span class="action-icon">
+                <svg viewBox="0 0 32 32" aria-hidden="true">
+                  <path d="M16 27V11M9 18l7-7 7 7M8 27h16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M10 5h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".55"/>
+                </svg>
+              </span>
+              <span class="action-name">主动弹跳</span>
+              <span class="action-meta"><b>34</b> 能量</span>
+            </button>
+
+            <button class="action-btn skill-btn" id="skillJet" data-skill="jet" type="button">
+              <span class="action-icon">
+                <svg viewBox="0 0 32 32" aria-hidden="true">
+                  <path d="M16 4c4 5 6 10 6 15l-3 4h-6l-3-4c0-5 2-10 6-15Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                  <path d="M10 22 7 27M22 22l3 5M13 25l-2 4M19 25l2 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="action-name">喷气起飞</span>
+              <span class="action-meta"><b>52</b> 能量</span>
+            </button>
+          </div>
+
+          <div class="controls">
+            <div class="steer-wrap">
+              <div class="steer-label"><span>STEER</span><span>方向盘</span></div>
+              <div class="steering-wheel" id="steeringWheel">
+                <button class="steer-touch steer-left" id="steerLeft" type="button" aria-label="向左变道">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="steer-touch steer-right" id="steerRight" type="button" aria-label="向右变道">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <div class="wheel-rim">
+                  <span class="wheel-spoke spoke-l"></span>
+                  <span class="wheel-spoke spoke-r"></span>
+                  <span class="wheel-spoke spoke-b"></span>
+                  <span class="wheel-hub"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="pedals">
+              <button class="pedal brake-pedal" id="brakePedal" type="button" aria-label="刹车">
+                <span class="pedal-top"></span>
+                <span class="pedal-face">
+                  <span class="pedal-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                  </span>
+                  <strong>刹车</strong>
+                  <small>BRAKE</small>
+                </span>
+              </button>
+              <button class="pedal throttle-pedal" id="throttlePedal" type="button" aria-label="油门">
+                <span class="pedal-top"></span>
+                <span class="pedal-face">
+                  <span class="pedal-icon">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18V8l6-4 6 4v10M9 18v-5h6v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </span>
+                  <strong>油门</strong>
+                  <small>THROTTLE</small>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="welcome" class="overlay welcome">
+        <div class="welcome-content">
+          <div class="welcome-eyebrow"><span></span> ENDLESS HIGHWAY / 无尽高速</div>
+          <div class="welcome-title">
+            <h1>公路<br><em>之王</em></h1>
+            <div class="title-en">KING OF<br>THE HIGHWAY</div>
+          </div>
+          <p class="welcome-tagline">看看你能坚持多久，成为公路之王？</p>
+          <p class="welcome-copy">三车道、无尽车流与一千种失控方式。速度越快，得分越高；活用技能，在钢铁洪流里杀出一条路。</p>
+          <div class="welcome-rule"><span></span>刹车力超过 1612N 会触发踏板断裂 · 油量归零即告终</div>
+
+          <div class="welcome-actions">
+            <button id="startBtn" class="start-btn" type="button">
+              <span class="start-glow"></span>
+              <span>踩下油门</span>
+              <small>START ENGINE</small>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="welcome-best">历史最高 <strong id="welcomeBest">0</strong></div>
+          </div>
+
+          <div class="welcome-hints">
+            <span><b>A / D</b> 变道</span>
+            <span><b>W</b> 油门</span>
+            <span><b>S</b> 刹车</span>
+            <span><b>空格</b> 鸣笛</span>
+          </div>
+        </div>
+        <div class="welcome-ticker" aria-hidden="true">
+          <span>CAUTION / 1612N BREAKING POINT</span>
+          <span>NO SECOND CHANCES</span>
+          <span>KING OF THE HIGHWAY</span>
+        </div>
+      </div>
+
+      <div id="endingBanner" class="ending-banner is-hidden">
+        <div id="endingTag" class="ending-tag">普通结局</div>
+        <h2 id="endingTitle">车祸</h2>
+        <p id="endingSub">高速上没有重来键</p>
+      </div>
+
+      <div id="results" class="overlay results is-hidden">
+        <div class="result-card">
+          <div class="result-topline">
+            <span>RUN COMPLETE</span>
+            <span id="resultEndingType">普通结局</span>
+          </div>
+          <h2 id="resultTitle">车祸</h2>
+          <p id="resultDesc" class="result-desc">高速上没有重来键。</p>
+
+          <div class="result-score">
+            <span>最终得分</span>
+            <strong id="finalScore">0</strong>
+            <em id="newBest" class="is-hidden">新纪录</em>
+          </div>
+
+          <div class="result-stats">
+            <div><span>行驶距离</span><strong id="resultDistance">0 m</strong></div>
+            <div><span>存活时间</span><strong id="resultTime">0 s</strong></div>
+            <div><span>最高速度</span><strong id="resultSpeed">0 km/h</strong></div>
+            <div><span>技能释放</span><strong id="resultSkills">0 次</strong></div>
+          </div>
+
+          <button id="restartBtn" class="restart-btn" type="button">
+            再跑一局
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button id="homeBtn" class="home-btn" type="button">返回首页</button>
+        </div>
+      </div>
+
+      <div id="rotateHint" class="rotate-hint">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="7" width="20" height="34" rx="4" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M20 37h8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+        <span>请保持竖屏游玩</span>
+      </div>
+    </section>
+  </main>
+
+  <script src="three.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
